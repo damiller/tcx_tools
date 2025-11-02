@@ -2,6 +2,8 @@
 
 import argparse
 from dateutil.parser import isoparse
+
+import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -11,11 +13,12 @@ from my_tcx_parser import MyTcxParser
 def main():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--smooth-factor", type=int, default=20, help="How much to smooth the heart rate")
     parser.add_argument("file", type=str, help="File to parse")
     args = parser.parse_args()
 
     tcx = MyTcxParser(args.file)
-
+    smooth_kernel = np.array([1.0 / args.smooth_factor] * args.smooth_factor)
     # Find first lap with any target power
     reference_time = None
     for lap in tcx.activity.Lap:
@@ -30,11 +33,14 @@ def main():
         break
     
     heart_points = tcx.get_points_with_heart_rate()
-    heart_rates = [float(_.HeartRateBpm.Value.text) for _ in heart_points]
-    heart_times = [isoparse(_.Time.text) for _ in heart_points]
+    heart_rates = np.array([float(_.HeartRateBpm.Value.text) for _ in heart_points])
+    smooth_heart_rates = np.convolve(heart_rates, smooth_kernel, "valid")
+    heart_times = np.array([isoparse(_.Time.text) for _ in heart_points])
+    
     if reference_time is None:
         reference_time = heart_times[0]
     normalized_heart_times = [(_-reference_time).total_seconds() / 60.0 for _ in heart_times]
+    smooth_normalized_heart_times = normalized_heart_times[args.smooth_factor:]
 
     power_points = tcx.get_points_with_power()
     powers = [float(_.Extensions.Power.text) for _ in power_points]
@@ -58,7 +64,9 @@ def main():
         "hoversubplots": "overlaying"}
     )
     hearts_scatter = go.Scatter(xaxis="x", x=normalized_heart_times, y=heart_rates, name="Heart Rate")
+    smooth_hearts_scatter = go.Scatter(xaxis="x", x=smooth_normalized_heart_times, y=smooth_heart_rates, name="Smoothed Heart Rate")
     fig.add_trace(hearts_scatter, row=1, col=1)
+    fig.add_trace(smooth_hearts_scatter, row=1, col=1)
     next(fig.select_xaxes(row=1, col=1)).update(title="Time Elapsed (min.)")
     next(fig.select_yaxes(row=1, col=1)).update(title="Heart Rate (bpm)")
 

@@ -25,7 +25,7 @@ def main():
     cumulative_energy = 0
     total_minutes = 0
     target_power = 0
-    
+
     for i in range(nrLaps):
         lap_start = isoparse(tcx.activity.Lap[i].attrib["StartTime"])
         minutes = tcx.activity.Lap[i].TotalTimeSeconds / 60.0
@@ -57,8 +57,12 @@ def main():
             averaged_power_element = etree.SubElement(extensions, "AveragePower")
             averaged_power_element._setText(str(avg_power))
 
+            last_timepoint = 0
             for j, trackpoint in enumerate(tcx.get_trackpoint_iter(i)):
                 timepoint = (isoparse(str(trackpoint.Time)) - lap_start).total_seconds()
+                if timepoint < last_timepoint:
+                    print(f"    Out of order timepoint at {trackpoint.Time}")
+                last_timepoint = timepoint
                 point_cumulative_energy = cumulative_energy + lap_power * timepoint
 
                 if not hasattr(trackpoint, "Extensions"):
@@ -70,7 +74,10 @@ def main():
                 target_power_element = etree.SubElement(extensions, "TargetPower")
                 target_power_element._setText(str(target_power))
                 averaged_power_element = etree.SubElement(extensions, "AveragePower")
-                avg_point_power = point_cumulative_energy / (total_minutes * 60 + timepoint)
+                if cumulative_energy == 0:
+                    avg_point_power = avg_power
+                else:
+                    avg_point_power = point_cumulative_energy / (total_minutes * 60 + timepoint)
                 averaged_power_element._setText(str(avg_point_power))
 
             # Update cumulative energy
@@ -79,11 +86,6 @@ def main():
 
     with open(outputPath, "wb") as f:
         f.write(etree.tostring(tcx.root, pretty_print=True))
-
-
-
-
-
 
 if __name__ == '__main__':
     main()
