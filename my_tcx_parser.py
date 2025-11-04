@@ -1,13 +1,17 @@
+from pathlib import Path
 
 import lxml
-from typing import Optional, Iterable
+import lxml.etree
+
+from collections.abc import Iterator
+from typing import Optional, Iterable, Union
 
 import tcxparser
 
 class MyTcxParser(tcxparser.TCXParser):
     _TRACKPOINT_TAG = "{*}Trackpoint"
 
-    def __init__(self, tcx_file: str):
+    def __init__(self, tcx_file: Union[str, Path]):
         super().__init__(tcx_file)
 
     def get_points_with_heart_rate(self) -> Iterable[lxml.etree.ElementBase]:
@@ -22,7 +26,7 @@ class MyTcxParser(tcxparser.TCXParser):
     def get_nr_laps(self) -> int:
         return len(self.activity.Lap)
     
-    def get_trackpoint_iter(self, lap: Optional[int] = None) -> int:
+    def get_trackpoint_iter(self, lap: Optional[int] = None) -> Iterator[lxml.etree.ElementBase]:
         if lap is None:
             # all the points
             return self.activity.iterdescendants(tag=self._TRACKPOINT_TAG)

@@ -58,10 +58,12 @@ def main():
             averaged_power_element._setText(str(avg_power))
 
             last_timepoint = 0
-            for j, trackpoint in enumerate(tcx.get_trackpoint_iter(i)):
+            for trackpoint in tcx.get_trackpoint_iter(i):
                 timepoint = (isoparse(str(trackpoint.Time)) - lap_start).total_seconds()
                 if timepoint < last_timepoint:
                     print(f"    Out of order timepoint at {trackpoint.Time}")
+                elif timepoint > last_timepoint + 10:
+                    print(f"    Large jump in timepoint at {trackpoint.Time}")
                 last_timepoint = timepoint
                 point_cumulative_energy = cumulative_energy + lap_power * timepoint
 
