@@ -64,9 +64,12 @@ def main():
     cumulative_energy_by_type = {}
     cumulative_minutes_by_type = {}
 
-    # Add metadata to the activity
-    activity_metadata = etree.SubElement(tcx.activity, "Metadata")
-    # ... add metadata elements as needed
+    # Add activity metadata under Extensions so it matches the lap-level schema.
+    if hasattr(tcx.activity, "Extensions"):
+        activity_extensions = tcx.activity.Extensions
+    else:
+        activity_extensions = etree.SubElement(tcx.activity, "Extensions")
+
     if args.type == EffortType.UNKNOWN:
         if parsed_effort != EffortType.UNKNOWN:
             args.type = parsed_effort
@@ -74,7 +77,7 @@ def main():
             input_type = input("Enter effort type (pace, target_heart_rate, lactate_threshold, ftp_test, intervals): ")
             if input_type:
                 args.type = EffortType(input_type)
-    effort_type_element = etree.SubElement(activity_metadata, "EffortDetails", attrib={"EffortType": str(args.type)})
+    effort_type_element = etree.SubElement(activity_extensions, "EffortDetails", attrib={"EffortType": str(args.type)})
     # Details for PACE type effort
     if args.type == EffortType.PACE:
         if parsed_power is None:
@@ -85,7 +88,7 @@ def main():
         effort_power_element._setText(str(parsed_power))
 
     if args.route != "":
-        route_element = etree.SubElement(activity_metadata, "Route")
+        route_element = etree.SubElement(activity_extensions, "Route")
         route_element._setText(args.route)
 
     if parsed_date is not None:
@@ -139,9 +142,6 @@ def main():
                     if target_power > last_target_power:
                         print(f"Beginning effort...")
                         lap_type = lap_type.WORKOUT
-                        if args.type == EffortType.PACE:
-                            target_element = etree.SubElement(activity_metadata, "TargetPace")
-                            target_element._setText(str(target_power))
                 elif lap_type == LapType.WORKOUT:
                     if target_power < last_target_power:
                         print("Cooling down...")
@@ -203,10 +203,9 @@ def main():
         effort_power = cumulative_energy_by_type[LapType.WORKOUT] / cumulative_minutes_by_type[LapType.WORKOUT] / 60
         print(f"Effort power   : {effort_power:.1f} W")
 
-        extensions = etree.SubElement(tcx.activity, "Extensions")
-        effort_duration_element = etree.SubElement(extensions, "EffortDuration")
+        effort_duration_element = etree.SubElement(activity_extensions, "EffortDuration")
         effort_duration_element._setText(str(cumulative_minutes_by_type[LapType.WORKOUT] * 60.0))
-        effort_power_element = etree.SubElement(extensions, "ActualPower")
+        effort_power_element = etree.SubElement(activity_extensions, "ActualPower")
         effort_power_element._setText(str(effort_power))
 
     with open(outputPath, "wb") as f:
