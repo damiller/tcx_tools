@@ -4,16 +4,27 @@ import argparse
 from dateutil.parser import isoparse
 from lxml import etree
 from pathlib import Path
-from si_prefix import si_format
 import re
+from si_prefix import si_format
 import sys
 
-from my_tcx_parser import LapType, MyTcxParser
+from my_tcx_parser import EffortType, LapType, MyTcxParser
+
+WORKOUT_NAME_RE = re.compile(
+    r"^(?P<effort>[A-Za-z]+)-(?P<date>\d{8})-(?P<route>[A-Za-z0-9_-]+)-(?P<power>\d+(?:\.\d+)?)W$"
+)
+
+def convert_from_camel_to_spaced(name: str) -> str:
+    """ Transforms a camel case string into a spaced string. For example, "CamelCase" becomes "Camel Case".
+    """
+    return re.sub(r'((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))', r' \1', name)
 
 def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, help="Overwrite existing file")
+    parser.add_argument("--type", type=EffortType, default=EffortType.UNKNOWN, help="Type of effort (pace, LTT, FTP, intervals)")
+    parser.add_argument("--route", type=str, default="", help="Route name to add to the activity")
     parser.add_argument("file", type=str, help="File to parse")
     args = parser.parse_args()
 
@@ -27,6 +38,21 @@ def main():
             print(f"Output file {outputPath} already exists. Specify --overwrite to replace")
             sys.exit(1)
 
+    # Parse the input filename for metadata
+    result = WORKOUT_NAME_RE.match(inputPath.stem)
+    if isinstance(result, re.Match):
+        parsed_effort = EffortType(result.group("effort").lower())
+        parsed_date = isoparse(result.group("date"))
+        parsed_route = convert_from_camel_to_spaced(result.group("route"))
+        if args.route != "" and args.route != parsed_route:
+            print(f"Route name in filename ({parsed_route}) does not match specified route name ({args.route})")
+        parsed_power = result.group("power")
+    else:
+        parsed_effort = EffortType.UNKNOWN
+        parsed_date = None
+        parsed_route = None
+        parsed_power = None
+
     nrLaps = tcx.get_nr_laps()
     print(f"Activity has {nrLaps} laps")
 
@@ -37,6 +63,36 @@ def main():
     lap_type = LapType.NOT_STARTED
     cumulative_energy_by_type = {}
     cumulative_minutes_by_type = {}
+
+    # Add metadata to the activity
+    activity_metadata = etree.SubElement(tcx.activity, "Metadata")
+    # ... add metadata elements as needed
+    if args.type == EffortType.UNKNOWN:
+        if parsed_effort != EffortType.UNKNOWN:
+            args.type = parsed_effort
+        else:
+            input_type = input("Enter effort type (pace, target_heart_rate, lactate_threshold, ftp_test, intervals): ")
+            if input_type:
+                args.type = EffortType(input_type)
+    effort_type_element = etree.SubElement(activity_metadata, "EffortDetails", attrib={"EffortType": str(args.type)})
+    # Details for PACE type effort
+    if args.type == EffortType.PACE:
+        if parsed_power is None:
+            input_power = input("Enter target pace (W): ")
+            if input_power:
+                parsed_power = input_power
+        effort_power_element = etree.SubElement(effort_type_element, "TargetPower")
+        effort_power_element._setText(str(parsed_power))
+
+    if args.route != "":
+        route_element = etree.SubElement(activity_metadata, "Route")
+        route_element._setText(args.route)
+
+    if parsed_date is not None:
+        # Sanity check that we have the right data
+        activity_date = isoparse(tcx.activity.Id.text).date()
+        if parsed_date.date() != activity_date:
+            print(f"Warning: date in filename ({parsed_date.date()}) does not match activity start time ({activity_start_time.date()})")
 
     for i in range(nrLaps):
         manual_lap_type = None
@@ -83,11 +139,14 @@ def main():
                     if target_power > last_target_power:
                         print(f"Beginning effort...")
                         lap_type = lap_type.WORKOUT
+                        if args.type == EffortType.PACE:
+                            target_element = etree.SubElement(activity_metadata, "TargetPace")
+                            target_element._setText(str(target_power))
                 elif lap_type == LapType.WORKOUT:
                     if target_power < last_target_power:
                         print("Cooling down...")
                         lap_type = lap_type.COOLDOWN
-        
+
         lap_type_element._setText(str(lap_type))
         if lap_type == LapType.SETTLE_IN:
             continue

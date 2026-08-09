@@ -15,6 +15,7 @@ class EffortType(StrEnum):
     LACTATE_THRESHOLD = auto()
     FTP_TEST = auto()
     INTERVALS = auto()
+    UNKNOWN = auto()
 
 class LapType(StrEnum):
     NOT_STARTED = auto()  # Placeholder to hold a last lap before activity has started
