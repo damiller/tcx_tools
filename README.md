@@ -1,0 +1,1 @@
+This workspace is a small Python project for working with TCX workout files, most likely cycling/running data exported from devices like Garmin. The code is organized around parsing and analyzing fitness sessions, then annotating or plotting the results.

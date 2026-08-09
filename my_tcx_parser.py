@@ -1,3 +1,4 @@
+from enum import auto, StrEnum
 from pathlib import Path
 
 import lxml
@@ -8,6 +9,22 @@ from typing import Optional, Iterable, Union
 
 import tcxparser
 
+class EffortType(StrEnum):
+    PACE = auto()
+    TARGET_HEART_RATE = auto()
+    LACTATE_THRESHOLD = auto()
+    FTP_TEST = auto()
+    INTERVALS = auto()
+
+class LapType(StrEnum):
+    NOT_STARTED = auto()  # Placeholder to hold a last lap before activity has started
+    SETTLE_IN = auto()
+    WARMUP = auto()
+    WORKOUT = auto()
+    COOLDOWN = auto()
+    INTERVAL = auto()
+    REST = auto()
+ 
 class MyTcxParser(tcxparser.TCXParser):
     _TRACKPOINT_TAG = "{*}Trackpoint"
 

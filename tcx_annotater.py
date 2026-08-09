@@ -5,19 +5,27 @@ from dateutil.parser import isoparse
 from lxml import etree
 from pathlib import Path
 from si_prefix import si_format
+import re
+import sys
 
-from my_tcx_parser import MyTcxParser
+from my_tcx_parser import LapType, MyTcxParser
 
 def main():
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, help="Overwrite existing file")
     parser.add_argument("file", type=str, help="File to parse")
     args = parser.parse_args()
 
     inputPath = Path(args.file)
     tcx = MyTcxParser(inputPath)
     outputPath = inputPath.with_stem(inputPath.stem + "_annotated")
-    print(f"{outputPath=}")
+    if Path.exists(outputPath):
+        if args.overwrite:
+            print(f"Overwriting existing file {outputPath}")
+        else:
+            print(f"Output file {outputPath} already exists. Specify --overwrite to replace")
+            sys.exit(1)
 
     nrLaps = tcx.get_nr_laps()
     print(f"Activity has {nrLaps} laps")
@@ -25,69 +33,126 @@ def main():
     cumulative_energy = 0
     total_minutes = 0
     target_power = 0
+    last_target_power = 0
+    lap_type = LapType.NOT_STARTED
+    cumulative_energy_by_type = {}
+    cumulative_minutes_by_type = {}
 
     for i in range(nrLaps):
+        manual_lap_type = None
         lap_start = isoparse(tcx.activity.Lap[i].attrib["StartTime"])
         minutes = tcx.activity.Lap[i].TotalTimeSeconds / 60.0
         print(f"Lap {i} has duration {minutes:.2f} minutes")
         target_power_str = input("Target power for this lap: ")
+
         if target_power_str == "":
             # Use last target power
             print(f"Using previous power {target_power}")
+        elif target_power_str[0].isalpha():
+            alpha_portion = re.findall(r"\b[a-zA-Z]+", target_power_str)
+            print(f"Found alpha {alpha_portion}")
+            # Get the lap type by matching the first alphabetical portion against the keys
+            to_match = alpha_portion[0].upper()
+            matches = [_ for _ in LapType if _.name.startswith(to_match)]
+            print(f"Found matches {matches}")
+            manual_lap_type = matches[0]
+            removed_alpha = target_power_str
+            for iPortion in alpha_portion:
+                removed_alpha = removed_alpha.replace(iPortion, "")
+
+            target_power = float(removed_alpha)
         else:
             target_power = float(target_power_str)
 
         extensions = etree.SubElement(tcx.activity.Lap[i], "Extensions")
         target_power_element = etree.SubElement(extensions, "TargetPower")
         target_power_element._setText(str(target_power))
+        lap_type_element = etree.SubElement(extensions, "LapType")
 
-        if target_power == 0:
-            print(f"Settling in lap...")
+        if manual_lap_type is not None:
+            lap_type = manual_lap_type
         else:
-            avg_power = float(input("Cumulative average power for this lap: "))
+            if target_power == 0:
+                print(f"Settling in lap...")
+                lap_type = LapType.SETTLE_IN
+            else:
+                if lap_type == LapType.NOT_STARTED or lap_type == LapType.SETTLE_IN:
+                    print(f"Warming up...")
+                    lap_type = lap_type.WARMUP
+                elif lap_type == LapType.WARMUP:
+                    if target_power > last_target_power:
+                        print(f"Beginning effort...")
+                        lap_type = lap_type.WORKOUT
+                elif lap_type == LapType.WORKOUT:
+                    if target_power < last_target_power:
+                        print("Cooling down...")
+                        lap_type = lap_type.COOLDOWN
+        
+        lap_type_element._setText(str(lap_type))
+        if lap_type == LapType.SETTLE_IN:
+            continue
 
-            new_cumulative_energy = avg_power * (total_minutes + minutes) * 60
-            lap_power = (new_cumulative_energy - cumulative_energy) / (minutes * 60)
+        avg_power = float(input("Cumulative average power for this lap: "))
 
-            print(f"  Lap power: {lap_power:.1f} W")
-            print(f"  Energy exerted: {si_format(new_cumulative_energy, 1)}J")
+        new_cumulative_energy = avg_power * (total_minutes + minutes) * 60
+        lap_power = (new_cumulative_energy - cumulative_energy) / (minutes * 60)
+        cumulative_energy_by_type[lap_type] = cumulative_energy_by_type.get(lap_type, 0) + lap_power * minutes * 60
+        cumulative_minutes_by_type[lap_type] = cumulative_minutes_by_type.get(lap_type, 0) + minutes
 
-            lap_power_element = etree.SubElement(extensions, "Power")
-            lap_power_element._setText(str(lap_power))
+        print(f"  Lap power: {lap_power:.1f} W")
+        print(f"  Energy exerted: {si_format(new_cumulative_energy, 1)}J")
+
+        lap_power_element = etree.SubElement(extensions, "Power")
+        lap_power_element._setText(str(lap_power))
+        averaged_power_element = etree.SubElement(extensions, "AveragePower")
+        averaged_power_element._setText(str(avg_power))
+
+        last_timepoint = 0
+        for trackpoint in tcx.get_trackpoint_iter(i):
+            timepoint = (isoparse(str(trackpoint.Time)) - lap_start).total_seconds()
+            if timepoint < last_timepoint:
+                print(f"    Out of order timepoint at {trackpoint.Time}")
+            elif timepoint > last_timepoint + 10:
+                print(f"    Large jump in timepoint at {trackpoint.Time}")
+            last_timepoint = timepoint
+            point_cumulative_energy = cumulative_energy + lap_power * timepoint
+
+            if not hasattr(trackpoint, "Extensions"):
+                print(f"    Skipping trackpoint at time {timepoint} with no extensions")
+                continue
+            extensions = trackpoint.Extensions
+            trackpoint_power_element = etree.SubElement(extensions, "Power")
+            trackpoint_power_element._setText(str(lap_power))
+            target_power_element = etree.SubElement(extensions, "TargetPower")
+            target_power_element._setText(str(target_power))
             averaged_power_element = etree.SubElement(extensions, "AveragePower")
-            averaged_power_element._setText(str(avg_power))
+            if cumulative_energy == 0:
+                avg_point_power = avg_power
+            else:
+                avg_point_power = point_cumulative_energy / (total_minutes * 60 + timepoint)
+            averaged_power_element._setText(str(avg_point_power))
 
-            last_timepoint = 0
-            for trackpoint in tcx.get_trackpoint_iter(i):
-                timepoint = (isoparse(str(trackpoint.Time)) - lap_start).total_seconds()
-                if timepoint < last_timepoint:
-                    print(f"    Out of order timepoint at {trackpoint.Time}")
-                elif timepoint > last_timepoint + 10:
-                    print(f"    Large jump in timepoint at {trackpoint.Time}")
-                last_timepoint = timepoint
-                point_cumulative_energy = cumulative_energy + lap_power * timepoint
+        # Update cumulative energy
+        total_minutes += minutes
+        cumulative_energy = new_cumulative_energy
 
-                if not hasattr(trackpoint, "Extensions"):
-                    print(f"    Skipping trackpoint at time {timepoint} with no extensions")
-                    continue
-                extensions = trackpoint.Extensions
-                trackpoint_power_element = etree.SubElement(extensions, "Power")
-                trackpoint_power_element._setText(str(lap_power))
-                target_power_element = etree.SubElement(extensions, "TargetPower")
-                target_power_element._setText(str(target_power))
-                averaged_power_element = etree.SubElement(extensions, "AveragePower")
-                if cumulative_energy == 0:
-                    avg_point_power = avg_power
-                else:
-                    avg_point_power = point_cumulative_energy / (total_minutes * 60 + timepoint)
-                averaged_power_element._setText(str(avg_point_power))
+        last_target_power = target_power
 
-            # Update cumulative energy
-            total_minutes += minutes
-            cumulative_energy = new_cumulative_energy
+    # Print workout summary
+    if LapType.WORKOUT in cumulative_energy_by_type:
+        print(f"Effort duration: {cumulative_minutes_by_type.get(LapType.WORKOUT):.1f} min.")
+        effort_power = cumulative_energy_by_type[LapType.WORKOUT] / cumulative_minutes_by_type[LapType.WORKOUT] / 60
+        print(f"Effort power   : {effort_power:.1f} W")
+
+        extensions = etree.SubElement(tcx.activity, "Extensions")
+        effort_duration_element = etree.SubElement(extensions, "EffortDuration")
+        effort_duration_element._setText(str(cumulative_minutes_by_type[LapType.WORKOUT] * 60.0))
+        effort_power_element = etree.SubElement(extensions, "ActualPower")
+        effort_power_element._setText(str(effort_power))
 
     with open(outputPath, "wb") as f:
         f.write(etree.tostring(tcx.root, pretty_print=True))
+
 
 if __name__ == '__main__':
     main()
