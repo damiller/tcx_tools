@@ -12,6 +12,7 @@ import tcxparser
 class EffortType(StrEnum):
     PACE = auto()
     TARGET_HEART_RATE = auto()
+    LIMITHR = TARGET_HEART_RATE
     LACTATE_THRESHOLD = auto()
     FTP_TEST = auto()
     INTERVALS = auto()
@@ -25,7 +26,7 @@ class LapType(StrEnum):
     COOLDOWN = auto()
     INTERVAL = auto()
     REST = auto()
- 
+
 class MyTcxParser(tcxparser.TCXParser):
     _TRACKPOINT_TAG = "{*}Trackpoint"
 
@@ -36,14 +37,14 @@ class MyTcxParser(tcxparser.TCXParser):
         trackpoints = [_ for _ in self.root.Activities.iterdescendants(tag=self._TRACKPOINT_TAG) if hasattr(_, "HeartRateBpm")]
 
         return trackpoints
-    
+
     def get_points_with_power(self) -> Iterable[lxml.etree.ElementBase]:
         trackpoints = [_ for _ in self.activity.iterdescendants(tag=self._TRACKPOINT_TAG) if hasattr(_, "Extensions") and hasattr(_.Extensions, "Power")]
         return trackpoints
-    
+
     def get_nr_laps(self) -> int:
         return len(self.activity.Lap)
-    
+
     def get_trackpoint_iter(self, lap: Optional[int] = None) -> Iterator[lxml.etree.ElementBase]:
         if lap is None:
             # all the points
