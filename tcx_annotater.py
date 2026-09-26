@@ -86,6 +86,12 @@ def main():
                 parsed_power = input_power
         effort_power_element = etree.SubElement(effort_type_element, "TargetPower")
         effort_power_element._setText(str(parsed_power))
+    elif args.type == EffortType.TARGET_HEART_RATE:
+        # Details for TARGET_HEART_RATE type effort
+        input_hr = input("Enter target heart rate (bpm): ")
+        if input_hr:
+            effort_hr_element = etree.SubElement(effort_type_element, "TargetHeartRate")
+            effort_hr_element._setText(str(input_hr))
 
     if args.route != "":
         route_element = etree.SubElement(activity_extensions, "Route")
